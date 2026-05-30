@@ -29,6 +29,9 @@
   #reader img { display:none; }            /* ライブラリのスキャン中アイコンを隠す */
   .hint { font-size:.72rem; color:var(--sub); margin:0 0 8px; line-height:1.4; }
   .hint b { color:var(--accent); }
+  .seg { display:flex; gap:8px; }
+  .seg-btn { flex:1; background:#2a2a44; color:var(--sub); font-weight:600; }
+  .seg-btn.on { background:var(--ok); color:#10101e; }
   .status { font-size:.82rem; color:var(--sub); min-height:1.2em; margin:6px 0; }
   .list { list-style:none; padding:0; margin:0; }
   .item { display:flex; gap:10px; align-items:flex-start; padding:10px; border-radius:10px; background:#1c1c33; margin-bottom:8px; }
@@ -64,6 +67,15 @@
 </div>
 
 <div class="card">
+  <label>新しくスキャンする本の既定の状態</label>
+  <div class="seg">
+    <button class="seg-btn" data-mode="unread">未読のまま</button>
+    <button class="seg-btn" data-mode="done">読了（今日）</button>
+  </div>
+  <p class="hint" style="margin:8px 0 0;">「読了（今日）」にすると、これ以降スキャンした本は自動で <code>done 今日</code> になります。本ごとの「読了」ボタンで個別に切り替えもできます。</p>
+</div>
+
+<div class="card">
   <div id="reader"></div>
   <p class="hint">本の裏の<b>上のバーコード（978… で始まる方）</b>を枠に入れてください。<br>
      下の <code>192…</code> は分類コードなので読みません。明るい場所で15〜20cm離すとピントが合いやすいです。</p>
@@ -87,7 +99,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books' };
+const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books', defstate:'bs_defstate' };
 const today = () => { const d=new Date(), p=n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
 
@@ -99,6 +111,16 @@ $('filepath').onchange = () => localStorage.setItem(LS.filepath, $('filepath').v
 
 let books = JSON.parse(localStorage.getItem(LS.books) || '[]');
 const saveBooks = () => localStorage.setItem(LS.books, JSON.stringify(books));
+
+// --- 既定の読了状態モード ---
+let defState = localStorage.getItem(LS.defstate) || 'unread';
+function renderMode(){
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('on', b.dataset.mode === defState));
+}
+document.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
+  defState = b.dataset.mode; localStorage.setItem(LS.defstate, defState); renderMode();
+});
+renderMode();
 
 // --- 描画 ---
 function render() {
@@ -175,9 +197,12 @@ async function onScan(text) {
   busy = true;
   $('status').textContent = `確認中… ${code}`;
   const info = await fetchBook(code);
-  books.unshift({ isbn:code, read:false, ...info });
+  const read = (defState === 'done');
+  books.unshift({ isbn:code, read, ...info });
   saveBooks(); render();
-  $('status').textContent = info.title ? `✓ ${info.title}` : `△ 書名は確認できませんでした（ISBNは記録）`;
+  if (navigator.vibrate) navigator.vibrate(read ? [50,40,50] : 70);   // 読了は2回、未読は1回
+  $('status').textContent = (info.title ? `✓ ${info.title}` : `△ 書名は確認できませんでした（ISBNは記録）`)
+                          + (read ? '（読了）' : '');
   beep(info.title ? 660 : 300);
   busy = false;
 }
