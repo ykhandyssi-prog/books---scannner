@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ISBNスキャナ → 登録キュー</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root { --bg:#1a1a2e; --card:#23233b; --accent:#4cc9f0; --ok:#43d17a; --warn:#f0a04c; --text:#e8e8f0; --sub:#9a9ab0; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+         background:var(--bg); color:var(--text); padding:12px; padding-bottom:90px; }
+  h1 { font-size:1.05rem; margin:4px 0 2px; }
+  .lead { font-size:.74rem; color:var(--sub); margin:0 0 12px; }
+  .card { background:var(--card); border-radius:12px; padding:12px; margin-bottom:12px; }
+  label { font-size:.78rem; color:var(--sub); display:block; margin-bottom:3px; }
+  input { width:100%; padding:9px; border-radius:8px; border:1px solid #3a3a55; background:#14142a; color:var(--text); font-size:.95rem; }
+  .row { display:flex; gap:8px; }
+  .row > div { flex:1; }
+  button { border:none; border-radius:10px; padding:13px; font-size:1rem; font-weight:600; color:#10101e; cursor:pointer; }
+  .btn-scan { background:var(--accent); width:100%; }
+  .btn-stop { background:var(--warn); width:100%; }
+  .btn-save { background:var(--ok); }
+  .btn-ghost { background:#3a3a55; color:var(--text); }
+  #reader { width:100%; border-radius:12px; overflow:hidden; margin-bottom:8px; }
+  #reader:empty { display:none; }
+  .status { font-size:.82rem; color:var(--sub); min-height:1.2em; margin:6px 0; }
+  .list { list-style:none; padding:0; margin:0; }
+  .item { display:flex; gap:10px; align-items:flex-start; padding:10px; border-radius:10px; background:#1c1c33; margin-bottom:8px; }
+  .item img { width:42px; height:60px; object-fit:cover; border-radius:4px; background:#333; flex:0 0 auto; }
+  .item .meta { flex:1; min-width:0; }
+  .item .ttl { font-weight:600; font-size:.92rem; line-height:1.3; }
+  .item .sub { font-size:.76rem; color:var(--sub); margin-top:2px; }
+  .item .acts { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
+  .item .done { font-size:.7rem; padding:4px 8px; border-radius:6px; background:#2a2a44; color:var(--sub); }
+  .item .done.on { background:var(--ok); color:#10101e; }
+  .item .del { background:none; color:#ff6b81; padding:2px 6px; font-size:1.2rem; }
+  .count { font-size:.85rem; color:var(--accent); font-weight:600; }
+  .footer { position:fixed; left:0; right:0; bottom:0; background:rgba(20,20,40,.96); padding:12px; display:flex; gap:8px; box-shadow:0 -4px 16px rgba(0,0,0,.4); }
+  .footer button { flex:1; }
+  .empty { color:var(--sub); text-align:center; padding:20px; font-size:.9rem; }
+</style>
+</head>
+<body>
+<h1>📚 ISBNスキャナ</h1>
+<p class="lead">読んだISBNを <code>00_Inbox/本_未登録ISBN.md</code> に追記します。書誌生成はPCの <code>import_books.py</code> が担当（このアプリは控えるだけ）。</p>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <label>Vault名</label>
+      <input id="vault" placeholder="yk-Obsidian">
+    </div>
+    <div>
+      <label>登録キューのパス</label>
+      <input id="filepath" placeholder="00_Inbox/本_未登録ISBN.md">
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div id="reader"></div>
+  <button id="toggle" class="btn-scan">📷 スキャン開始</button>
+  <div class="status" id="status"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span class="count" id="count">0冊</span>
+    <button class="btn-ghost" id="manual" style="padding:6px 12px;font-size:.8rem;">手入力</button>
+  </div>
+  <ul class="list" id="list"></ul>
+  <div class="empty" id="empty">スキャンするとここに本が並びます。<br>「読了」を押した本だけ <code>done 今日</code> が付きます。</div>
+</div>
+
+<div class="footer">
+  <button class="btn-ghost" id="clear">クリア</button>
+  <button class="btn-save" id="save">📥 キューに追記</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books' };
+const today = () => { const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
+
+// --- 設定の復元 ---
+$('vault').value    = localStorage.getItem(LS.vault)    || 'yk-Obsidian';
+$('filepath').value = localStorage.getItem(LS.filepath) || '00_Inbox/本_未登録ISBN.md';
+$('vault').onchange    = () => localStorage.setItem(LS.vault,    $('vault').value.trim());
+$('filepath').onchange = () => localStorage.setItem(LS.filepath, $('filepath').value.trim());
+
+let books = JSON.parse(localStorage.getItem(LS.books) || '[]');
+const saveBooks = () => localStorage.setItem(LS.books, JSON.stringify(books));
+
+// --- 描画 ---
+function render() {
+  const list = $('list');
+  list.innerHTML = '';
+  $('empty').style.display = books.length ? 'none' : 'block';
+  $('count').textContent = books.length + '冊';
+  books.forEach((b, i) => {
+    const li = document.createElement('li');
+    li.className = 'item';
+    li.innerHTML = `
+      ${b.cover ? `<img src="${b.cover}" onerror="this.style.visibility='hidden'">` : `<img style="visibility:hidden">`}
+      <div class="meta">
+        <div class="ttl">${escapeHtml(b.title || '(書名は取得できず／ISBNは記録します)')}</div>
+        <div class="sub">${escapeHtml([b.author, b.publisher].filter(Boolean).join(' / '))}</div>
+        <div class="sub">ISBN ${b.isbn}</div>
+      </div>
+      <div class="acts">
+        <button class="done ${b.read?'on':''}" data-r="${i}">${b.read?'読了✓':'読了'}</button>
+        <button class="del" data-d="${i}">×</button>
+      </div>`;
+    list.appendChild(li);
+  });
+  list.querySelectorAll('.del').forEach(btn => btn.onclick = () => {
+    books.splice(+btn.dataset.d, 1); saveBooks(); render();
+  });
+  list.querySelectorAll('.done').forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.r; books[i].read = !books[i].read; saveBooks(); render();
+  });
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// --- 書誌取得（確認表示用のみ。記録はISBNだけ）---
+async function fetchBook(isbn) {
+  try {
+    const r = await fetch(`https://api.openbd.jp/v1/get?isbn=${isbn}`);
+    const j = await r.json();
+    if (j && j[0] && j[0].summary && j[0].summary.title) {
+      const s = j[0].summary;
+      return { title:s.title, author:s.author, publisher:s.publisher, cover:s.cover || '' };
+    }
+  } catch(e){}
+  try {
+    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const j = await r.json();
+    if (j.totalItems > 0) {
+      const v = j.items[0].volumeInfo;
+      return { title:v.title, author:(v.authors||[]).join(', '),
+               publisher:v.publisher||'', cover:(v.imageLinks||{}).thumbnail || '' };
+    }
+  } catch(e){}
+  return { title:'', author:'', publisher:'', cover:'' };
+}
+
+// --- スキャン処理 ---
+let scanner = null, scanning = false, lastCode = '', lastTime = 0, busy = false;
+
+async function onScan(text) {
+  const code = text.replace(/[^0-9]/g,'');
+  if (!/^97[89]\d{10}$/.test(code)) return;          // ISBN-13のみ
+  const now = Date.now();
+  if (code === lastCode && now - lastTime < 3000) return;
+  if (busy) return;
+  lastCode = code; lastTime = now;
+  if (books.some(b => b.isbn === code)) { $('status').textContent = `既に追加済: ${code}`; beep(180); return; }
+  busy = true;
+  $('status').textContent = `確認中… ${code}`;
+  const info = await fetchBook(code);
+  books.unshift({ isbn:code, read:false, ...info });
+  saveBooks(); render();
+  $('status').textContent = info.title ? `✓ ${info.title}` : `△ 書名は確認できませんでした（ISBNは記録）`;
+  beep(info.title ? 660 : 300);
+  busy = false;
+}
+
+function beep(freq){
+  try { const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator();
+    o.connect(c.destination); o.frequency.value=freq; o.start(); setTimeout(()=>{o.stop();c.close();},120);
+  } catch(e){}
+}
+
+async function startScan() {
+  scanner = new Html5Qrcode('reader', { formatsToSupport:[ Html5QrcodeSupportedFormats.EAN_13 ] });
+  try {
+    await scanner.start({ facingMode:'environment' },
+      { fps:10, qrbox:{width:260,height:140} },
+      onScan, () => {});
+    scanning = true;
+    $('toggle').textContent = '⏹ スキャン停止';
+    $('toggle').className = 'btn-stop';
+    $('status').textContent = '本の裏のバーコードをカメラに向けてください';
+  } catch(e) {
+    $('status').textContent = '⚠ カメラを起動できません（HTTPSで開く必要があります）';
+  }
+}
+async function stopScan() {
+  if (scanner) { try { await scanner.stop(); scanner.clear(); } catch(e){} }
+  scanning = false;
+  $('toggle').textContent = '📷 スキャン開始';
+  $('toggle').className = 'btn-scan';
+}
+$('toggle').onclick = () => scanning ? stopScan() : startScan();
+
+// --- 手入力 ---
+$('manual').onclick = async () => {
+  const v = prompt('ISBN（13桁）を入力');
+  if (v) await onScan(v);
+};
+
+// --- クリア ---
+$('clear').onclick = () => { if (confirm('リストを全部消しますか？')) { books=[]; saveBooks(); render(); } };
+
+// --- キューに追記（Advanced URI / mode=append）---
+$('save').onclick = () => {
+  if (!books.length) { alert('リストが空です'); return; }
+  const vault    = ($('vault').value.trim()    || 'yk-Obsidian');
+  const filepath = ($('filepath').value.trim() || '00_Inbox/本_未登録ISBN.md');
+  const d = today();
+  // スキャンは新しい順に積まれるので、追記はスキャンした順（古い順）に並べ直す
+  const lines = [...books].reverse().map(b => b.read ? `${b.isbn} done ${d}` : b.isbn);
+  const data = '\n' + lines.join('\n');   // 先頭改行でキュー末尾に新しい行として付く
+  const uri = `obsidian://advanced-uri?vault=${encodeURIComponent(vault)}`
+            + `&filepath=${encodeURIComponent(filepath)}`
+            + `&data=${encodeURIComponent(data)}&mode=append`;
+  $('status').textContent = `Obsidianに ${books.length}件 追記します…`;
+  window.location.href = uri;
+};
+
+render();
+</script>
+</body>
+</html>
