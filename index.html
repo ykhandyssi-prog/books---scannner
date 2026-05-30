@@ -301,8 +301,10 @@ $('save').onclick = () => {
   const uri = `obsidian://advanced-uri?vault=${encodeURIComponent(vault)}`
             + `&filepath=${encodeURIComponent(filepath)}`
             + `&data=${encodeURIComponent(data)}&mode=append`;
-  $('status').textContent = `Obsidianに ${books.length}件 追記します…`;
-  window.location.href = uri;
+  const n = books.length;
+  window.location.href = uri;                 // URIにデータは入っているので、この後クリアして良い
+  books = []; saveBooks(); render();          // 二重登録防止：追記したらリストを空にする
+  $('status').textContent = `Obsidianに ${n}件 追記し、リストをクリアしました`;
 };
 
 render();
