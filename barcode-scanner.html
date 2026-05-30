@@ -40,9 +40,10 @@
   .item .ttl { font-weight:600; font-size:.92rem; line-height:1.3; }
   .item .sub { font-size:.76rem; color:var(--sub); margin-top:2px; }
   .item .acts { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
-  .item .done { font-size:.7rem; padding:4px 8px; border-radius:6px; background:#2a2a44; color:var(--sub); }
-  .item .done.on { background:var(--ok); color:#10101e; }
-  .item .del { background:none; color:#ff6b81; padding:2px 6px; font-size:1.2rem; }
+  .item .tg { font-size:.7rem; padding:4px 8px; border-radius:6px; background:#2a2a44; color:var(--sub); white-space:nowrap; }
+  .item .tg.on { background:var(--ok); color:#10101e; }
+  .item .del { background:none; color:#ff6b81; padding:2px 6px; font-size:1.2rem; align-self:flex-end; }
+  .seg-label { font-size:.72rem; color:var(--sub); margin-bottom:3px; }
   .count { font-size:.85rem; color:var(--accent); font-weight:600; }
   .footer { position:fixed; left:0; right:0; bottom:0; background:rgba(20,20,40,.96); padding:12px; display:flex; gap:8px; box-shadow:0 -4px 16px rgba(0,0,0,.4); }
   .footer button { flex:1; }
@@ -67,12 +68,24 @@
 </div>
 
 <div class="card">
-  <label>新しくスキャンする本の既定の状態</label>
-  <div class="seg">
-    <button class="seg-btn" data-mode="unread">未読のまま</button>
-    <button class="seg-btn" data-mode="done">読了（今日）</button>
+  <label>新しくスキャンする本の既定</label>
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div>
+      <div class="seg-label">状態</div>
+      <div class="seg">
+        <button class="seg-btn" data-group="state" data-val="unread">未読</button>
+        <button class="seg-btn" data-group="state" data-val="done">読了済み</button>
+      </div>
+    </div>
+    <div>
+      <div class="seg-label">読了日</div>
+      <div class="seg">
+        <button class="seg-btn" data-group="date" data-val="none">なし</button>
+        <button class="seg-btn" data-group="date" data-val="today">今日</button>
+      </div>
+    </div>
   </div>
-  <p class="hint" style="margin:8px 0 0;">「読了（今日）」にすると、これ以降スキャンした本は自動で <code>done 今日</code> になります。本ごとの「読了」ボタンで個別に切り替えもできます。</p>
+  <p class="hint" style="margin:8px 0 0;">読了日「今日」を選ぶと状態は自動で「読了済み」になります（<b>読了日があれば必ず読了済み</b>）。本ごとの切り替えは各カードのボタンでできます。</p>
 </div>
 
 <div class="card">
@@ -89,7 +102,7 @@
     <button class="btn-ghost" id="manual" style="padding:6px 12px;font-size:.8rem;">手入力</button>
   </div>
   <ul class="list" id="list"></ul>
-  <div class="empty" id="empty">スキャンするとここに本が並びます。<br>「読了」を押した本だけ <code>done 今日</code> が付きます。</div>
+  <div class="empty" id="empty">スキャンするとここに本が並びます。<br>各カードで「状態」と「読了日」を個別に切り替えられます。</div>
 </div>
 
 <div class="footer">
@@ -99,7 +112,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books', defstate:'bs_defstate' };
+const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books', defstate:'bs_defstate', defdate:'bs_defdate' };
 const today = () => { const d=new Date(), p=n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
 
@@ -112,13 +125,24 @@ $('filepath').onchange = () => localStorage.setItem(LS.filepath, $('filepath').v
 let books = JSON.parse(localStorage.getItem(LS.books) || '[]');
 const saveBooks = () => localStorage.setItem(LS.books, JSON.stringify(books));
 
-// --- 既定の読了状態モード ---
-let defState = localStorage.getItem(LS.defstate) || 'unread';
+// --- 既定モード（状態と読了日は独立。ただし読了日ありなら必ず読了済み）---
+let defState = localStorage.getItem(LS.defstate) || 'unread';   // 'unread' | 'done'
+let defDate  = localStorage.getItem(LS.defdate)  || 'none';     // 'none'   | 'today'
+function saveMode(){ localStorage.setItem(LS.defstate, defState); localStorage.setItem(LS.defdate, defDate); }
 function renderMode(){
-  document.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('on', b.dataset.mode === defState));
+  if (defDate === 'today') defState = 'done';                   // 不変条件
+  document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => b.classList.toggle('on', b.dataset.val === defState));
+  document.querySelectorAll('.seg-btn[data-group="date"]').forEach(b => b.classList.toggle('on', b.dataset.val === defDate));
 }
-document.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
-  defState = b.dataset.mode; localStorage.setItem(LS.defstate, defState); renderMode();
+document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => b.onclick = () => {
+  defState = b.dataset.val;
+  if (defState === 'unread') defDate = 'none';                  // 未読にしたら読了日は外す
+  saveMode(); renderMode();
+});
+document.querySelectorAll('.seg-btn[data-group="date"]').forEach(b => b.onclick = () => {
+  defDate = b.dataset.val;
+  if (defDate === 'today') defState = 'done';                   // 読了日ありなら読了済み
+  saveMode(); renderMode();
 });
 renderMode();
 
@@ -139,7 +163,8 @@ function render() {
         <div class="sub">ISBN ${b.isbn}</div>
       </div>
       <div class="acts">
-        <button class="done ${b.read?'on':''}" data-r="${i}">${b.read?'読了✓':'読了'}</button>
+        <button class="tg ${b.read?'on':''}" data-st="${i}">${b.read?'読了済み':'未読'}</button>
+        <button class="tg ${b.finished?'on':''}" data-dt="${i}">${b.finished ? '読了日 '+b.finished.slice(5) : '読了日なし'}</button>
         <button class="del" data-d="${i}">×</button>
       </div>`;
     list.appendChild(li);
@@ -147,8 +172,18 @@ function render() {
   list.querySelectorAll('.del').forEach(btn => btn.onclick = () => {
     books.splice(+btn.dataset.d, 1); saveBooks(); render();
   });
-  list.querySelectorAll('.done').forEach(btn => btn.onclick = () => {
-    const i = +btn.dataset.r; books[i].read = !books[i].read; saveBooks(); render();
+  // 状態トグル：未読にしたら読了日も外す
+  list.querySelectorAll('.tg[data-st]').forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.st; books[i].read = !books[i].read;
+    if (!books[i].read) books[i].finished = '';
+    saveBooks(); render();
+  });
+  // 読了日トグル（なし⇄今日）：日付をつけたら必ず読了済み
+  list.querySelectorAll('.tg[data-dt]').forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.dt;
+    books[i].finished = books[i].finished ? '' : today();
+    if (books[i].finished) books[i].read = true;
+    saveBooks(); render();
   });
 }
 function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -197,12 +232,13 @@ async function onScan(text) {
   busy = true;
   $('status').textContent = `確認中… ${code}`;
   const info = await fetchBook(code);
-  const read = (defState === 'done');
-  books.unshift({ isbn:code, read, ...info });
+  const finished = (defDate === 'today') ? today() : '';
+  const read = (defState === 'done') || !!finished;             // 読了日ありなら必ず読了済み
+  books.unshift({ isbn:code, read, finished, ...info });
   saveBooks(); render();
   if (navigator.vibrate) navigator.vibrate(read ? [50,40,50] : 70);   // 読了は2回、未読は1回
   $('status').textContent = (info.title ? `✓ ${info.title}` : `△ 書名は確認できませんでした（ISBNは記録）`)
-                          + (read ? '（読了）' : '');
+                          + (read ? (finished ? `（読了 ${finished.slice(5)}）` : '（読了済み）') : '');
   beep(info.title ? 660 : 300);
   busy = false;
 }
@@ -253,9 +289,14 @@ $('save').onclick = () => {
   if (!books.length) { alert('リストが空です'); return; }
   const vault    = ($('vault').value.trim()    || 'yk-Obsidian');
   const filepath = ($('filepath').value.trim() || '00_Inbox/本_未登録ISBN.md');
-  const d = today();
   // スキャンは新しい順に積まれるので、追記はスキャンした順（古い順）に並べ直す
-  const lines = [...books].reverse().map(b => b.read ? `${b.isbn} done ${d}` : b.isbn);
+  // 出力: 未読=「ISBN」 / 読了済み(日付なし)=「ISBN done」 / 読了済み(日付あり)=「ISBN done YYYY-MM-DD」
+  const lines = [...books].reverse().map(b => {
+    let s = b.isbn;
+    if (b.read) s += ' done';
+    if (b.finished) s += ' ' + b.finished;
+    return s;
+  });
   const data = '\n' + lines.join('\n');   // 先頭改行でキュー末尾に新しい行として付く
   const uri = `obsidian://advanced-uri?vault=${encodeURIComponent(vault)}`
             + `&filepath=${encodeURIComponent(filepath)}`
