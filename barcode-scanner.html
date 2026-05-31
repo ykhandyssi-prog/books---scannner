@@ -32,6 +32,8 @@
   .seg { display:flex; gap:8px; }
   .seg-btn { flex:1; background:#2a2a44; color:var(--sub); font-weight:600; }
   .seg-btn.on { background:var(--ok); color:#10101e; }
+  .seg-btn.reading { background:var(--warn); color:#10101e; }
+  .item .tg.reading { background:var(--warn); color:#10101e; }
   .status { font-size:.82rem; color:var(--sub); min-height:1.2em; margin:6px 0; }
   .list { list-style:none; padding:0; margin:0; }
   .item { display:flex; gap:10px; align-items:flex-start; padding:10px; border-radius:10px; background:#1c1c33; margin-bottom:8px; }
@@ -74,6 +76,7 @@
       <div class="seg-label">状態</div>
       <div class="seg">
         <button class="seg-btn" data-group="state" data-val="unread">未読</button>
+        <button class="seg-btn" data-group="state" data-val="in-progress">読書中</button>
         <button class="seg-btn" data-group="state" data-val="done">読了済み</button>
       </div>
     </div>
@@ -123,20 +126,31 @@ $('vault').onchange    = () => localStorage.setItem(LS.vault,    $('vault').valu
 $('filepath').onchange = () => localStorage.setItem(LS.filepath, $('filepath').value.trim());
 
 let books = JSON.parse(localStorage.getItem(LS.books) || '[]');
+// 旧データ（read:真偽）を state（unread/in-progress/done）へ移行
+books = books.map(b => {
+  if (!b.state) b.state = b.read ? 'done' : 'unread';
+  delete b.read;
+  return b;
+});
 const saveBooks = () => localStorage.setItem(LS.books, JSON.stringify(books));
+const STATE_LABEL = { unread:'未読', 'in-progress':'読書中', done:'読了済み' };
 
 // --- 既定モード（状態と読了日は独立。ただし読了日ありなら必ず読了済み）---
-let defState = localStorage.getItem(LS.defstate) || 'unread';   // 'unread' | 'done'
+let defState = localStorage.getItem(LS.defstate) || 'unread';   // 'unread' | 'in-progress' | 'done'
 let defDate  = localStorage.getItem(LS.defdate)  || 'none';     // 'none'   | 'today'
 function saveMode(){ localStorage.setItem(LS.defstate, defState); localStorage.setItem(LS.defdate, defDate); }
 function renderMode(){
-  if (defDate === 'today') defState = 'done';                   // 不変条件
-  document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => b.classList.toggle('on', b.dataset.val === defState));
+  if (defDate === 'today') defState = 'done';                   // 不変条件：読了日ありなら読了済み
+  document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => {
+    const sel = b.dataset.val === defState;
+    b.classList.toggle('on',      sel && b.dataset.val !== 'in-progress');
+    b.classList.toggle('reading', sel && b.dataset.val === 'in-progress');
+  });
   document.querySelectorAll('.seg-btn[data-group="date"]').forEach(b => b.classList.toggle('on', b.dataset.val === defDate));
 }
 document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => b.onclick = () => {
   defState = b.dataset.val;
-  if (defState === 'unread') defDate = 'none';                  // 未読にしたら読了日は外す
+  if (defState !== 'done') defDate = 'none';                    // 読了日は読了済みのときだけ
   saveMode(); renderMode();
 });
 document.querySelectorAll('.seg-btn[data-group="date"]').forEach(b => b.onclick = () => {
@@ -163,7 +177,7 @@ function render() {
         <div class="sub">ISBN ${b.isbn}</div>
       </div>
       <div class="acts">
-        <button class="tg ${b.read?'on':''}" data-st="${i}">${b.read?'読了済み':'未読'}</button>
+        <button class="tg ${b.state==='done'?'on':(b.state==='in-progress'?'reading':'')}" data-st="${i}">${STATE_LABEL[b.state]}</button>
         <button class="tg ${b.finished?'on':''}" data-dt="${i}">${b.finished ? '読了日 '+b.finished.slice(5) : '読了日なし'}</button>
         <button class="del" data-d="${i}">×</button>
       </div>`;
@@ -172,17 +186,19 @@ function render() {
   list.querySelectorAll('.del').forEach(btn => btn.onclick = () => {
     books.splice(+btn.dataset.d, 1); saveBooks(); render();
   });
-  // 状態トグル：未読にしたら読了日も外す
+  // 状態トグル：未読→読書中→読了済み を循環。読了済み以外は読了日を外す
+  const ORDER = ['unread', 'in-progress', 'done'];
   list.querySelectorAll('.tg[data-st]').forEach(btn => btn.onclick = () => {
-    const i = +btn.dataset.st; books[i].read = !books[i].read;
-    if (!books[i].read) books[i].finished = '';
+    const i = +btn.dataset.st;
+    books[i].state = ORDER[(ORDER.indexOf(books[i].state) + 1) % 3];
+    if (books[i].state !== 'done') books[i].finished = '';
     saveBooks(); render();
   });
   // 読了日トグル（なし⇄今日）：日付をつけたら必ず読了済み
   list.querySelectorAll('.tg[data-dt]').forEach(btn => btn.onclick = () => {
     const i = +btn.dataset.dt;
     books[i].finished = books[i].finished ? '' : today();
-    if (books[i].finished) books[i].read = true;
+    if (books[i].finished) books[i].state = 'done';
     saveBooks(); render();
   });
 }
@@ -233,12 +249,13 @@ async function onScan(text) {
   $('status').textContent = `確認中… ${code}`;
   const info = await fetchBook(code);
   const finished = (defDate === 'today') ? today() : '';
-  const read = (defState === 'done') || !!finished;             // 読了日ありなら必ず読了済み
-  books.unshift({ isbn:code, read, finished, ...info });
+  const state = finished ? 'done' : defState;                   // 読了日ありなら必ず読了済み
+  books.unshift({ isbn:code, state, finished, ...info });
   saveBooks(); render();
-  if (navigator.vibrate) navigator.vibrate(read ? [50,40,50] : 70);   // 読了は2回、未読は1回
-  $('status').textContent = (info.title ? `✓ ${info.title}` : `△ 書名は確認できませんでした（ISBNは記録）`)
-                          + (read ? (finished ? `（読了 ${finished.slice(5)}）` : '（読了済み）') : '');
+  if (navigator.vibrate) navigator.vibrate(state === 'done' ? [50,40,50] : 70);   // 読了は2回、それ以外1回
+  const tag = state === 'done' ? (finished ? `（読了 ${finished.slice(5)}）` : '（読了済み）')
+            : state === 'in-progress' ? '（読書中）' : '';
+  $('status').textContent = (info.title ? `✓ ${info.title}` : `△ 書名は確認できませんでした（ISBNは記録）`) + tag;
   beep(info.title ? 660 : 300);
   busy = false;
 }
@@ -290,11 +307,11 @@ $('save').onclick = () => {
   const vault    = ($('vault').value.trim()    || 'yk-Obsidian');
   const filepath = ($('filepath').value.trim() || '00_Inbox/本_未登録ISBN.md');
   // スキャンは新しい順に積まれるので、追記はスキャンした順（古い順）に並べ直す
-  // 出力: 未読=「ISBN」 / 読了済み(日付なし)=「ISBN done」 / 読了済み(日付あり)=「ISBN done YYYY-MM-DD」
+  // 出力: 未読=「ISBN」 / 読書中=「ISBN in-progress」 / 読了済み=「ISBN done [YYYY-MM-DD]」
   const lines = [...books].reverse().map(b => {
     let s = b.isbn;
-    if (b.read) s += ' done';
-    if (b.finished) s += ' ' + b.finished;
+    if (b.state === 'done') { s += ' done'; if (b.finished) s += ' ' + b.finished; }
+    else if (b.state === 'in-progress') s += ' in-progress';
     return s;
   });
   const data = '\n' + lines.join('\n');   // 先頭改行でキュー末尾に新しい行として付く
