@@ -6,7 +6,7 @@
 <title>ISBNスキャナ → 登録キュー</title>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-  :root { --bg:#1a1a2e; --card:#23233b; --accent:#4cc9f0; --ok:#43d17a; --warn:#f0a04c; --ref:#b98cf0; --text:#e8e8f0; --sub:#9a9ab0; }
+  :root { --bg:#1a1a2e; --card:#23233b; --accent:#4cc9f0; --ok:#43d17a; --warn:#f0a04c; --ref:#b98cf0; --lib:#5bc8af; --text:#e8e8f0; --sub:#9a9ab0; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
          background:var(--bg); color:var(--text); padding:12px; padding-bottom:90px; }
@@ -34,8 +34,10 @@
   .seg-btn.on { background:var(--ok); color:#10101e; }
   .seg-btn.reading { background:var(--warn); color:#10101e; }
   .seg-btn.ref { background:var(--ref); color:#10101e; }
+  .seg-btn.lib { background:var(--lib); color:#10101e; }
   .item .tg.reading { background:var(--warn); color:#10101e; }
   .item .tg.ref { background:var(--ref); color:#10101e; }
+  .item .tg.lib { background:var(--lib); color:#10101e; }
   .status { font-size:.82rem; color:var(--sub); min-height:1.2em; margin:6px 0; }
   .list { list-style:none; padding:0; margin:0; }
   .item { display:flex; gap:10px; align-items:flex-start; padding:10px; border-radius:10px; background:#1c1c33; margin-bottom:8px; }
@@ -82,6 +84,13 @@
       </div>
     </div>
     <div>
+      <div class="seg-label">所有</div>
+      <div class="seg">
+        <button class="seg-btn" data-group="lib" data-val="own">所有</button>
+        <button class="seg-btn" data-group="lib" data-val="lib">図書館・借り物</button>
+      </div>
+    </div>
+    <div>
       <div class="seg-label">状態</div>
       <div class="seg">
         <button class="seg-btn" data-group="state" data-val="unread">未読</button>
@@ -124,7 +133,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books', defstate:'bs_defstate', defdate:'bs_defdate', defkind:'bs_defkind' };
+const LS = { vault:'bs_vault', filepath:'bs_filepath', books:'bs_books', defstate:'bs_defstate', defdate:'bs_defdate', defkind:'bs_defkind', deflib:'bs_deflib' };
 const today = () => { const d=new Date(), p=n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
 
@@ -139,6 +148,7 @@ let books = JSON.parse(localStorage.getItem(LS.books) || '[]');
 books = books.map(b => {
   if (!b.state) b.state = b.read ? 'done' : 'unread';
   if (!b.kind) b.kind = 'reading';          // 旧データは読み物として扱う
+  if (b.lib === undefined) b.lib = false;   // 旧データは所有として扱う
   delete b.read;
   return b;
 });
@@ -149,7 +159,8 @@ const STATE_LABEL = { unread:'未読', 'in-progress':'読書中', done:'読了�
 let defState = localStorage.getItem(LS.defstate) || 'unread';   // 'unread' | 'in-progress' | 'done'
 let defDate  = localStorage.getItem(LS.defdate)  || 'none';     // 'none'   | 'today'
 let defKind  = localStorage.getItem(LS.defkind)  || 'reading';  // 'reading' | 'reference'
-function saveMode(){ localStorage.setItem(LS.defstate, defState); localStorage.setItem(LS.defdate, defDate); localStorage.setItem(LS.defkind, defKind); }
+let defLib   = localStorage.getItem(LS.deflib) === 'true';      // false=所有 / true=図書館・借り物
+function saveMode(){ localStorage.setItem(LS.defstate, defState); localStorage.setItem(LS.defdate, defDate); localStorage.setItem(LS.defkind, defKind); localStorage.setItem(LS.deflib, defLib); }
 function renderMode(){
   if (defDate === 'today') defState = 'done';                   // 不変条件：読了日ありなら読了済み
   document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => {
@@ -162,6 +173,11 @@ function renderMode(){
     const sel = b.dataset.val === defKind;
     b.classList.toggle('on',  sel && b.dataset.val === 'reading');
     b.classList.toggle('ref', sel && b.dataset.val === 'reference');
+  });
+  document.querySelectorAll('.seg-btn[data-group="lib"]').forEach(b => {
+    const sel = (b.dataset.val === 'lib') === defLib;
+    b.classList.toggle('on',  sel && !defLib);                  // 所有＝緑
+    b.classList.toggle('lib', sel && defLib);                   // 図書館・借り物＝ティール
   });
 }
 document.querySelectorAll('.seg-btn[data-group="state"]').forEach(b => b.onclick = () => {
@@ -176,6 +192,10 @@ document.querySelectorAll('.seg-btn[data-group="date"]').forEach(b => b.onclick 
 });
 document.querySelectorAll('.seg-btn[data-group="kind"]').forEach(b => b.onclick = () => {
   defKind = b.dataset.val;                                      // 'reading' | 'reference'
+  saveMode(); renderMode();
+});
+document.querySelectorAll('.seg-btn[data-group="lib"]').forEach(b => b.onclick = () => {
+  defLib = b.dataset.val === 'lib';                             // 所有 / 図書館・借り物
   saveMode(); renderMode();
 });
 renderMode();
@@ -198,6 +218,7 @@ function render() {
       </div>
       <div class="acts">
         <button class="tg ${b.kind==='reference'?'ref':''}" data-kd="${i}">${b.kind==='reference'?'参考書':'読み物'}</button>
+        <button class="tg ${b.lib?'lib':''}" data-lb="${i}">${b.lib?'図書館':'所有'}</button>
         <button class="tg ${b.state==='done'?'on':(b.state==='in-progress'?'reading':'')}" data-st="${i}">${STATE_LABEL[b.state]}</button>
         <button class="tg ${b.finished?'on':''}" data-dt="${i}">${b.finished ? '読了日 '+b.finished.slice(5) : '読了日なし'}</button>
         <button class="del" data-d="${i}">×</button>
@@ -211,6 +232,12 @@ function render() {
   list.querySelectorAll('.tg[data-kd]').forEach(btn => btn.onclick = () => {
     const i = +btn.dataset.kd;
     books[i].kind = books[i].kind === 'reference' ? 'reading' : 'reference';
+    saveBooks(); render();
+  });
+  // 所有トグル（所有⇄図書館・借り物）
+  list.querySelectorAll('.tg[data-lb]').forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.lb;
+    books[i].lib = !books[i].lib;
     saveBooks(); render();
   });
   // 状態トグル：未読→読書中→読了済み を循環。読了済み以外は読了日を外す
@@ -277,7 +304,7 @@ async function onScan(text) {
   const info = await fetchBook(code);
   const finished = (defDate === 'today') ? today() : '';
   const state = finished ? 'done' : defState;                   // 読了日ありなら必ず読了済み
-  books.unshift({ isbn:code, kind:defKind, state, finished, ...info });
+  books.unshift({ isbn:code, kind:defKind, lib:defLib, state, finished, ...info });
   saveBooks(); render();
   if (navigator.vibrate) navigator.vibrate(state === 'done' ? [50,40,50] : 70);   // 読了は2回、それ以外1回
   const tag = state === 'done' ? (finished ? `（読了 ${finished.slice(5)}）` : '（読了済み）')
@@ -335,12 +362,13 @@ $('save').onclick = () => {
   const filepath = ($('filepath').value.trim() || '00_Inbox/本_未登録ISBN.md');
   // スキャンは新しい順に積まれるので、追記はスキャンした順（古い順）に並べ直す
   // 出力: 未読=「ISBN」 / 読書中=「ISBN in-progress」 / 読了済み=「ISBN done [YYYY-MM-DD]」
-  // 参考書は行末に「ref」を付ける（import_books.py が kind: reference にする）
+  // 参考書は行末に「ref」、図書館・借り物は「lib」を付ける（import_books.py が解釈する）
   const lines = [...books].reverse().map(b => {
     let s = b.isbn;
     if (b.state === 'done') { s += ' done'; if (b.finished) s += ' ' + b.finished; }
     else if (b.state === 'in-progress') s += ' in-progress';
     if (b.kind === 'reference') s += ' ref';
+    if (b.lib) s += ' lib';
     return s;
   });
   const data = '\n' + lines.join('\n');   // 先頭改行でキュー末尾に新しい行として付く
